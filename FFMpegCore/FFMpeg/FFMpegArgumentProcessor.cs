@@ -44,6 +44,7 @@ namespace FFMpegCore
             _onPercentageProgress = onPercentageProgress;
             return this;
         }
+
         /// <summary>
         /// Register action that will be invoked during the ffmpeg processing, when a progress time is output and parsed
         /// </summary>
@@ -63,32 +64,36 @@ namespace FFMpegCore
             _onOutput = onOutput;
             return this;
         }
+
         public FFMpegArgumentProcessor NotifyOnError(Action<string> onError)
         {
             _onError = onError;
             return this;
         }
+
         public FFMpegArgumentProcessor CancellableThrough(out Action cancel, int timeout = 0)
         {
             cancel = () => CancelEvent?.Invoke(this, timeout);
             return this;
         }
+
         public FFMpegArgumentProcessor CancellableThrough(CancellationToken token, int timeout = 0)
         {
             token.Register(() => CancelEvent?.Invoke(this, timeout));
             return this;
         }
+
         public FFMpegArgumentProcessor Configure(Action<FFOptions> configureOptions)
         {
             _configurations.Add(configureOptions);
             return this;
         }
+
         public bool ProcessSynchronously(bool throwOnError = true, FFOptions? ffMpegOptions = null)
         {
             var options = GetConfiguredOptions(ffMpegOptions);
             var processArguments = PrepareProcessArguments(options, out var cancellationTokenSource);
 
-            
             IProcessResult? processResult = null;
             try
             {
@@ -107,7 +112,7 @@ namespace FFMpegCore
         {
             var options = GetConfiguredOptions(ffMpegOptions);
             var processArguments = PrepareProcessArguments(options, out var cancellationTokenSource);
-            
+
             IProcessResult? processResult = null;
             try
             {
@@ -118,7 +123,7 @@ namespace FFMpegCore
                 if (throwOnError)
                     throw;
             }
-            
+
             return HandleCompletion(throwOnError, processResult?.ExitCode ?? -1, processResult?.ErrorData ?? Array.Empty<string>());
         }
 
@@ -206,8 +211,8 @@ namespace FFMpegCore
 
             if (_onOutput != null || _onTimeProgress != null || (_onPercentageProgress != null && _totalTimespan != null))
                 processArguments.OutputDataReceived += OutputData;
-            
-            if (_onError != null)
+
+            if (_onError != null || _onTimeProgress != null || (_onPercentageProgress != null && _totalTimespan != null))
                 processArguments.ErrorDataReceived += ErrorData;
 
             return processArguments;
@@ -216,6 +221,16 @@ namespace FFMpegCore
         private void ErrorData(object sender, string msg)
         {
             _onError?.Invoke(msg);
+
+            var match = ProgressRegex.Match(msg);
+            if (!match.Success) return;
+
+            var processed = TimeSpan.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+            _onTimeProgress?.Invoke(processed);
+
+            if (_onPercentageProgress == null || _totalTimespan == null) return;
+            var percentage = Math.Round(processed.TotalSeconds / _totalTimespan.Value.TotalSeconds * 100, 2);
+            _onPercentageProgress(percentage);
         }
 
         private void OutputData(object sender, string msg)
